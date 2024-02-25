@@ -47,7 +47,7 @@ fn sql_to_code(sql: &str, bindings: &[String]) -> String {
         }
     }
     code.push_str("tx.commit().await?;\n");
-    code.push_str(&format!("({})", (0..vars).map(|i| i.to_string()).collect::<Vec<_>>().join(", ")));
+    code.push_str(&format!("({})", (0..vars-1).map(|i| format!("var{i}")).collect::<Vec<_>>().join(", ")));
     code.push('}');
 
     if input_vars-1 != bindings.len() {
