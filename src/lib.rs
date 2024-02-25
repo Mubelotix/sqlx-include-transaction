@@ -23,7 +23,7 @@ fn sql_to_code(sql: &str, bindings: &[String]) -> String {
     code.push('{');
     code.push_str("let mut tx = pool.begin().await?;\n");
 
-    let mut vars = 1;
+    let mut output_vars = 1;
     let mut input_vars = 1;
     for query in sql.split(';').map(str::trim).filter(|s| !s.is_empty()) {
         match caseless_contains(query, "returning") {
@@ -34,7 +34,7 @@ fn sql_to_code(sql: &str, bindings: &[String]) -> String {
                     input_vars += 1;
                 }
                 code.push_str(".fetch_one(&mut *tx).await?;\n");
-                vars += 1;
+                output_vars += 1;
             },
             false => {
                 code.push_str(&format!("sqlx::query(\"{query};\")"));
@@ -47,7 +47,7 @@ fn sql_to_code(sql: &str, bindings: &[String]) -> String {
         }
     }
     code.push_str("tx.commit().await?;\n");
-    code.push_str(&format!("({})", (0..vars-1).map(|i| format!("var{i}")).collect::<Vec<_>>().join(", ")));
+    code.push_str(&format!("({})", (0..output_vars-1).map(|i| format!("var{i}")).collect::<Vec<_>>().join(", ")));
     code.push('}');
 
     if input_vars-1 != bindings.len() {
