@@ -1,4 +1,4 @@
-use proc_macro::{TokenStream, TokenTree};
+use proc_macro::{Ident, TokenStream, TokenTree, Span};
 
 fn caseless_contains(text: &str, needle_lc: &str) -> bool {
     if text.len() < needle_lc.len() {
@@ -18,28 +18,41 @@ fn caseless_contains(text: &str, needle_lc: &str) -> bool {
     false
 }
 
-fn sql_to_code(sql: &str) -> String {
+fn sql_to_code(sql: &str, bindings: &[String]) -> String {
     let mut code = String::new(); // TODO: Using a string is convenient, but it's not the fastest way to build a TokenStream
     code.push('{');
-    code.push_str("let mut tx = pool.begin().await?;");
+    code.push_str("let mut tx = pool.begin().await?;\n");
 
-    let mut vars = 0;
-    for query in sql.split(';').map(str::trim) {
+    let mut vars = 1;
+    let mut input_vars = 1;
+    for query in sql.split(';').map(str::trim).filter(|s| !s.is_empty()) {
         match caseless_contains(query, "returning") {
             true => {
-                let line = format!("let var{vars} = sqlx::query_as::<_, _>(\"{query};\").bind(ip).fetch_one(&mut *tx).await?;");
-                code.push_str(&line);
+                code.push_str(&format!("let var{vars} = sqlx::query_as::<_, _>(\"{query};\")"));
+                while query.contains(&format!("${}", input_vars)) { // TODO: investigate potential bug with double digit input vars
+                    code.push_str(&format!(".bind({})", bindings[input_vars-1]));
+                    input_vars += 1;
+                }
+                code.push_str(".fetch_one(&mut *tx).await?;\n");
                 vars += 1;
             },
             false => {
-                let line = format!("sqlx::query(\"{query};\").bind(provider_id).execute(&mut *tx).await?;");
-                code.push_str(&line);
+                code.push_str(&format!("sqlx::query(\"{query};\")"));
+                while query.contains(&format!("${}", input_vars)) {
+                    code.push_str(&format!(".bind({})", bindings[input_vars-1]));
+                    input_vars += 1;
+                }
+                code.push_str(".execute(&mut *tx).await?;\n");
             }
         }
     }
-    code.push_str("tx.commit().await?;" );
+    code.push_str("tx.commit().await?;\n");
     code.push_str(&format!("({})", (0..vars).map(|i| i.to_string()).collect::<Vec<_>>().join(", ")));
     code.push('}');
+
+    if input_vars-1 != bindings.len() {
+        panic!("Expected {} input variables, but only {} were provided", input_vars, bindings.len());
+    }
 
     code
 }
@@ -77,7 +90,8 @@ fn include_tx_inner(input: TokenStream) -> String {
         panic!("Failed to read file {}", filename)
     });
 
-    sql_to_code(&sql)
+    let bindings = bindings.into_iter().map(|i| i.to_string()).collect::<Vec<_>>();
+    sql_to_code(&sql, &bindings)
 }
 
 #[proc_macro]
@@ -103,8 +117,8 @@ mod tests {
 
     #[test]
     fn test_codegen() {
-        let sql = "SELECT * FROM users; SELECT * FROM posts;";
-        let code = sql_to_code(sql);
+        let sql = "SELECT * FROM users WHERE value=$1; SELECT * FROM posts;";
+        let code = sql_to_code(sql, &[String::from("value")]);
         println!("{}", code);
     }
 }
