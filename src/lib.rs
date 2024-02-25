@@ -52,8 +52,19 @@ fn include_tx_inner(input: TokenStream) -> String {
         Some(_) => panic!("The filename argument must be a string literal"),
         None => panic!("Expected a filename argument")
     };
-    if tokens.next().is_some() {
-        panic!("Expected only one argument")
+
+    let mut bindings = Vec::new();
+    while let Some(token) = tokens.next() {
+        match token {
+            TokenTree::Punct(punct) if punct.as_char() == ',' => {},
+            _ => panic!("Arguments must be separated by commas")
+        }
+
+        match tokens.next() {
+            Some(TokenTree::Ident(ident)) => bindings.push(ident),
+            Some(_) => panic!("Bindings must be identifiers"),
+            None => break
+        }
     }
 
     let filename = lit.to_string();
